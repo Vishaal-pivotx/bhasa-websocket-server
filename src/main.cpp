@@ -16,7 +16,7 @@ using namespace std;
 std::vector<std::string> acceptable_keys = {"eaaassdr", "yfnhjfgt", "rhturjju"};
 std::vector<client> connected_clients;
 
-
+// pull out the type of messages sent by our config
 typedef websocketpp::config::asio::message_type::ptr message_ptr;
 typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::ssl::context> context_ptr;
 bool x = 0;
@@ -47,6 +47,16 @@ void on_message(server *s, websocketpp::connection_hdl hdl, message_ptr msg)
         bool word_time_offset = configx["word_time_offset"];
         int number_of_streams = configx["number_of_streams"];
 
+        std::cout << "\n---------------\n";
+        cout << "API key is " << api_key << endl;
+        cout << "format is  " << format << endl;
+        cout << "number of stream  is  " << number_of_streams << endl;
+        cout << "word time offset is  " << word_time_offset << endl;
+        cout << "interim is  " << interim << endl;
+        cout << "profanity is  " << profanity << endl;
+        cout << "language is  " << language.at(0) << endl;
+
+        std::cout << "---------------\n";
         for (std::string s : acceptable_keys)
         {
             if (s.compare(api_key) == 0)
@@ -61,6 +71,8 @@ void on_message(server *s, websocketpp::connection_hdl hdl, message_ptr msg)
     {
 
         // data is coming
+
+        s->send(hdl, " This is dummy text ", websocketpp::frame::opcode::TEXT);
     }
     return;
 }
@@ -77,7 +89,6 @@ std::string get_password()
 {
     return "test";
 }
-
 
 enum tls_mode
 {
