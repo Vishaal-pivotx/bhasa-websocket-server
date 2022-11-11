@@ -122,11 +122,13 @@ public:
                                                                                                           channel, 1,
                                                                                                           "en-US", 1, profanity_filter, true,
                                                                                                           true, false, true,
-                                                                                                          100, true, "x.json",
+                                                                                                          5000, true, "x.json",
                                                                                                           "", false, true,
                                                                                                           "", 10){
 
                                                                                                       };
    void sendData(std::string data);
+void    LoadWavDatax(std::vector<std::shared_ptr<WaveData>>&,std::string );
+
 };
 
