@@ -6,6 +6,7 @@
 #include <memory>
 #include <set>
 #include<csignal>
+#include "bs64.h"
 using namespace std;
 typedef websocketpp::server<websocketpp::config::asio_tls> server;
 
@@ -35,7 +36,6 @@ public:
         m_server.set_access_channels(websocketpp::log::alevel::none);
 
         m_server.init_asio();
-        // m_server.set_tls_init_handler(bind(&on_tls_init, MOZILLA_INTERMEDIATE, ::_1));
         m_server.set_tls_init_handler(bind(&broadcast_server::on_tls_init, this, MOZILLA_INTERMEDIATE, ::_1));
         m_server.set_open_handler(bind(&broadcast_server::on_open, this, ::_1));
         m_server.set_close_handler(bind(&broadcast_server::on_close, this, ::_1));
@@ -116,11 +116,15 @@ public:
         m_connections.erase(hdl);
     }
     int x = 0;
+    FILE *fx = fopen("i.wav","wb");
     void on_message(connection_hdl hdl, server::message_ptr msg)
     {
-
+        msg->set_opcode(websocketpp::frame::opcode::BINARY);
+//        std::cout << "message arrived" << msg->get_payload()<<endl;
         con_list::iterator id = m_connections.find(hdl);
         client *c = connected_clients.at(std::distance(m_connections.begin(), id));
+        std::cout << "message arrived2" << endl;
+
         if (c->verifyed_tryed == false)
         {
             // client sended the first message
@@ -139,12 +143,17 @@ public:
             c->interim = configx["interim"];
             c->word_time_offset = configx["word_time_offset"];
             c->number_of_streams = configx["number_of_streams"];
+            cout << "init ended"<<endl;
             c->sclient = new StreamingRecognizeClient_darshan(c->grpc_channel,true);
+            cout << "init ended sucess"<<endl;
         }
         else
         {
-            c->datatowritten.append(msg->get_payload());
-            // client sended many messages;
+  
+
+             c->datatowritten.append(msg->get_payload());
+             c->sendDatatoAsrServer();
+           
         }
     }
 
