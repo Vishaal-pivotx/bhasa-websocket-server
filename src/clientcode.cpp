@@ -169,6 +169,7 @@ int main(const int argc, const char *argv[])
             using rw_t = std::function<void(beast::error_code, std::size_t)>;
 
             beast::flat_buffer buffer;
+            std::shared_ptr<std::mutex> m=std::make_shared<std::mutex>();
             const rw_t recursion_read = [&](auto ec, auto readed)
             {
                 // r += 1;
@@ -178,7 +179,11 @@ int main(const int argc, const char *argv[])
                 // std::cout << beast::make_printable(buffer.data()) << std::endl;
                 //  end = clock();
                 // std::cout << "\n r is "<<readed<<" time is " <<(double)(end-start)/CLOCKS_PER_SEC<<std::endl;
+                 m->lock();
                  std::cout << beast::make_printable(buffer.data());
+                 std::cout.flush();
+                 buffer.clear();
+                 m->unlock();
                 if (!ec)
                 {
                     wss.async_read(buffer, recursion_read);
