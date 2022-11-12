@@ -1,326 +1,360 @@
 #include "streaming_recognize_client.h"
 
 StreamingRecognizeClient::StreamingRecognizeClient(
-        std::shared_ptr<grpc::Channel> channel, int32_t num_parallel_requests,
-        const std::string &language_code, int32_t max_alternatives, bool profanity_filter, bool word_time_offsets,
-        bool automatic_punctuation, bool separate_recognition_per_channel, bool print_transcripts,
-        int32_t chunk_duration_ms, bool interim_results, std::string output_filename,
-        std::string model_name, bool simulate_realtime, bool verbatim_transcripts,
-        const std::string &boosted_phrases_file, float boosted_phrases_score,std::shared_ptr<std::string> data):datax(data)
-        , print_latency_stats_(true), stub_(nr_asr::RivaSpeechRecognition::NewStub(channel)),
-          language_code_(language_code), max_alternatives_(max_alternatives), profanity_filter_(profanity_filter),
-          word_time_offsets_(word_time_offsets), automatic_punctuation_(automatic_punctuation),
-          separate_recognition_per_channel_(separate_recognition_per_channel),
-          print_transcripts_(print_transcripts), chunk_duration_ms_(chunk_duration_ms),
-          interim_results_(interim_results), total_audio_processed_(0.), num_streams_started_(0),
-          model_name_(model_name), simulate_realtime_(simulate_realtime),
-          verbatim_transcripts_(verbatim_transcripts), boosted_phrases_score_(boosted_phrases_score) {
-    num_active_streams_.store(0);
-    num_streams_finished_.store(0);
-    thread_pool_.reset(new ThreadPool(4 * num_parallel_requests));
+    std::shared_ptr<grpc::Channel> channel, int32_t num_parallel_requests,
+    const std::string& language_code, int32_t max_alternatives, bool profanity_filter,
+    bool word_time_offsets, bool automatic_punctuation, bool separate_recognition_per_channel,
+    bool print_transcripts, int32_t chunk_duration_ms, bool interim_results,
+    std::string output_filename, std::string model_name, bool simulate_realtime,
+    bool verbatim_transcripts, const std::string& boosted_phrases_file, float boosted_phrases_score,
+    std::shared_ptr<std::string> datab,std::shared_ptr<std::mutex> m)
+    : datax(datab), mymutex(m),print_latency_stats_(true),
+      stub_(nr_asr::RivaSpeechRecognition::NewStub(channel)), language_code_(language_code),
+      max_alternatives_(max_alternatives), profanity_filter_(profanity_filter),
+      word_time_offsets_(word_time_offsets), automatic_punctuation_(automatic_punctuation),
+      separate_recognition_per_channel_(separate_recognition_per_channel),
+      print_transcripts_(print_transcripts), chunk_duration_ms_(chunk_duration_ms),
+      interim_results_(interim_results), total_audio_processed_(0.), num_streams_started_(0),
+      model_name_(model_name), simulate_realtime_(simulate_realtime),
+      verbatim_transcripts_(verbatim_transcripts), boosted_phrases_score_(boosted_phrases_score)
+{
+  num_active_streams_.store(0);
+  num_streams_finished_.store(0);
+  thread_pool_.reset(new ThreadPool(4 * num_parallel_requests));
 
-    if (print_transcripts_) {
-        output_file_.open(output_filename);
-    }
+  if (print_transcripts_) {
+    output_file_.open(output_filename);
+  }
 
-    boosted_phrases_ = ReadBoostedPhrases(boosted_phrases_file);
+  boosted_phrases_ = ReadBoostedPhrases(boosted_phrases_file);
 }
 
-StreamingRecognizeClient::~StreamingRecognizeClient() {
-    if (print_transcripts_) {
-        output_file_.close();
-    }
-}
-
-void
-StreamingRecognizeClient::StartNewStream(std::unique_ptr<Stream> stream) {
-    std::shared_ptr<ClientCall> call =
-            std::make_shared<ClientCall>(stream->corr_id, word_time_offsets_);
-    call->streamer = stub_->StreamingRecognize(&call->context);
-    call->stream = std::move(stream);
-
-    num_active_streams_++;
-    num_streams_started_++;
-
-    auto gen_func = std::bind(&StreamingRecognizeClient::GenerateRequests, this, call);
-    auto recv_func =
-            std::bind(&StreamingRecognizeClient::ReceiveResponses, this, call, false /*audio_device*/);
-
-    thread_pool_->Enqueue(gen_func);
-    thread_pool_->Enqueue(recv_func);
+StreamingRecognizeClient::~StreamingRecognizeClient()
+{
+  if (print_transcripts_) {
+    output_file_.close();
+  }
 }
 
 void
-StreamingRecognizeClient::GenerateRequests(std::shared_ptr<ClientCall> call) {
-    float audio_processed = 0.;
+StreamingRecognizeClient::StartNewStream(std::unique_ptr<Stream> stream)
+{
+  std::shared_ptr<ClientCall> call =
+      std::make_shared<ClientCall>(stream->corr_id, word_time_offsets_, datax);
+  call->streamer = stub_->StreamingRecognize(&call->context);
+  call->stream = std::move(stream);
 
-    bool first_write = true;
-    bool done = false;
-    auto start_time = std::chrono::steady_clock::now();
-    while (!done) {
-        nr_asr::StreamingRecognizeRequest request;
-        if (first_write) {
-            auto streaming_config = request.mutable_streaming_config();
-            streaming_config->set_interim_results(interim_results_);
-            auto config = streaming_config->mutable_config();
-            config->set_sample_rate_hertz(call->stream->wav->sample_rate);
-            config->set_language_code(language_code_);
-            config->set_encoding(call->stream->wav->encoding);
-            config->set_max_alternatives(max_alternatives_);
-            config->set_profanity_filter(profanity_filter_);
-            config->set_audio_channel_count(call->stream->wav->channels);
-            config->set_enable_word_time_offsets(word_time_offsets_);
-            config->set_enable_automatic_punctuation(automatic_punctuation_);
-            config->set_enable_separate_recognition_per_channel(separate_recognition_per_channel_);
-            auto custom_config = config->mutable_custom_configuration();
-            (*custom_config)["test_key"] = "test_value";
-            config->set_verbatim_transcripts(verbatim_transcripts_);
-            if (model_name_ != "") {
-                config->set_model(model_name_);
-            }
+  num_active_streams_++;
+  num_streams_started_++;
 
-            nr_asr::SpeechContext *speech_context = config->add_speech_contexts();
-            *(speech_context->mutable_phrases()) = {boosted_phrases_.begin(), boosted_phrases_.end()};
-            speech_context->set_boost(boosted_phrases_score_);
+  auto gen_func = std::bind(&StreamingRecognizeClient::GenerateRequests, this, call);
+  auto recv_func =
+      std::bind(&StreamingRecognizeClient::ReceiveResponses, this, call, false /*audio_device*/);
 
-            call->streamer->Write(request);
-            first_write = false;
-        }
+  thread_pool_->Enqueue(gen_func);
+  thread_pool_->Enqueue(recv_func);
+}
 
-        size_t chunk_size =
-                (call->stream->wav->sample_rate * chunk_duration_ms_ / 1000) * sizeof(int16_t);
-        size_t &offset = call->stream->offset;
-        long header_size = (offset == 0U) ? call->stream->wav->data_offset : 0L;
-        size_t bytes_to_send =
-                std::min(call->stream->wav->data.size() - offset, chunk_size + header_size);
-        double current_wait_time =
-                1000. * (bytes_to_send - header_size) / (sizeof(int16_t) * call->stream->wav->sample_rate);
-        audio_processed += current_wait_time / 1000.F;
-        request.set_audio_content(&call->stream->wav->data[offset], bytes_to_send);
-        offset += bytes_to_send;
+void
+StreamingRecognizeClient::GenerateRequests(std::shared_ptr<ClientCall> call)
+{
+  float audio_processed = 0.;
 
-        if (simulate_realtime_) {
-            auto current_time = std::chrono::steady_clock::now();
-            double diff_time =
-                    std::chrono::duration<double, std::milli>(current_time - start_time).count();
-            double wait_time =
-                    current_wait_time - (diff_time - call->send_times.size() * chunk_duration_ms_);
+  bool first_write = true;
+  bool done = false;
+  auto start_time = std::chrono::steady_clock::now();
+  while (!done) {
+    nr_asr::StreamingRecognizeRequest request;
+    if (first_write) {
+      auto streaming_config = request.mutable_streaming_config();
+      streaming_config->set_interim_results(interim_results_);
+      auto config = streaming_config->mutable_config();
+      config->set_sample_rate_hertz(call->stream->wav->sample_rate);
+      config->set_language_code(language_code_);
+      config->set_encoding(call->stream->wav->encoding);
+      config->set_max_alternatives(max_alternatives_);
+      config->set_profanity_filter(profanity_filter_);
+      config->set_audio_channel_count(call->stream->wav->channels);
+      config->set_enable_word_time_offsets(word_time_offsets_);
+      config->set_enable_automatic_punctuation(automatic_punctuation_);
+      config->set_enable_separate_recognition_per_channel(separate_recognition_per_channel_);
+      auto custom_config = config->mutable_custom_configuration();
+      (*custom_config)["test_key"] = "test_value";
+      config->set_verbatim_transcripts(verbatim_transcripts_);
+      if (model_name_ != "") {
+        config->set_model(model_name_);
+      }
 
-            // To nanoseconds
-            wait_time *= 1.e3;
-            wait_time = std::max(wait_time, 0.);
-            // Round to nearest integer
-            wait_time = wait_time + 0.5 - (wait_time < 0);
-            int64_t usecs = (int64_t) wait_time;
-            // Sleep
-            if (usecs > 0) {
-                usleep(usecs);
-            }
-        }
-        call->send_times.push_back(std::chrono::steady_clock::now());
-        call->streamer->Write(request);
+      nr_asr::SpeechContext* speech_context = config->add_speech_contexts();
+      *(speech_context->mutable_phrases()) = {boosted_phrases_.begin(), boosted_phrases_.end()};
+      speech_context->set_boost(boosted_phrases_score_);
 
-        // Set write done to true so next call will lead to WritesDone
-        if (offset == call->stream->wav->data.size()) {
-            call->streamer->WritesDone();
-            done = true;
-        }
+      call->streamer->Write(request);
+      first_write = false;
     }
 
-    {
-        std::lock_guard<std::mutex> lock(latencies_mutex_);
-        total_audio_processed_ += audio_processed;
-    }
+    size_t chunk_size =
+        (call->stream->wav->sample_rate * chunk_duration_ms_ / 1000) * sizeof(int16_t);
+    size_t& offset = call->stream->offset;
+    long header_size = (offset == 0U) ? call->stream->wav->data_offset : 0L;
+    size_t bytes_to_send =
+        std::min(call->stream->wav->data.size() - offset, chunk_size + header_size);
+    double current_wait_time =
+        1000. * (bytes_to_send - header_size) / (sizeof(int16_t) * call->stream->wav->sample_rate);
+    audio_processed += current_wait_time / 1000.F;
+    request.set_audio_content(&call->stream->wav->data[offset], bytes_to_send);
+    offset += bytes_to_send;
 
-    num_active_streams_--;
+    if (simulate_realtime_) {
+      auto current_time = std::chrono::steady_clock::now();
+      double diff_time =
+          std::chrono::duration<double, std::milli>(current_time - start_time).count();
+      double wait_time =
+          current_wait_time - (diff_time - call->send_times.size() * chunk_duration_ms_);
+
+      // To nanoseconds
+      wait_time *= 1.e3;
+      wait_time = std::max(wait_time, 0.);
+      // Round to nearest integer
+      wait_time = wait_time + 0.5 - (wait_time < 0);
+      int64_t usecs = (int64_t)wait_time;
+      // Sleep
+      if (usecs > 0) {
+        usleep(usecs);
+      }
+    }
+    call->send_times.push_back(std::chrono::steady_clock::now());
+    call->streamer->Write(request);
+
+    // Set write done to true so next call will lead to WritesDone
+    if (offset == call->stream->wav->data.size()) {
+      call->streamer->WritesDone();
+      done = true;
+    }
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(latencies_mutex_);
+    total_audio_processed_ += audio_processed;
+  }
+
+  num_active_streams_--;
 }
 
 int
 StreamingRecognizeClient::DoStreamingFromFile(
-        std::string &audio_file, int32_t num_iterations, int32_t num_parallel_requests) {
-    // Preload all wav files, sort by size to reduce tail effects
-    std::vector<std::shared_ptr<WaveData>> all_wav;
-    try {
-        LoadWavData(all_wav, audio_file);
-    } catch (const std::exception &e) {
-        std::cerr << "Unable to load audio file(s): " << e.what() << std::endl;
-        return 1;
-    }
-    if (all_wav.size() == 0) {
-        std::cout << "No audio files specified. Exiting." << std::endl;
-        return 1;
-    }
+    std::string& audio_file, int32_t num_iterations, int32_t num_parallel_requests)
+{
+  // Preload all wav files, sort by size to reduce tail effects
+  std::vector<std::shared_ptr<WaveData>> all_wav;
+  try {
+    LoadWavData(all_wav, audio_file);
+  }
+  catch (const std::exception& e) {
+    std::cerr << "Unable to load audio file(s): " << e.what() << std::endl;
+    return 1;
+  }
+  if (all_wav.size() == 0) {
+    std::cout << "No audio files specified. Exiting." << std::endl;
+    return 1;
+  }
 
-    uint32_t all_wav_max = all_wav.size() * num_iterations;
-    std::vector<std::shared_ptr<WaveData>> all_wav_repeated;
-    all_wav_repeated.reserve(all_wav_max);
-    for (uint32_t file_id = 0; file_id < all_wav.size(); file_id++) {
-        for (int iter = 0; iter < num_iterations; iter++) {
-            all_wav_repeated.push_back(all_wav[file_id]);
-        }
+  uint32_t all_wav_max = all_wav.size() * num_iterations;
+  std::vector<std::shared_ptr<WaveData>> all_wav_repeated;
+  all_wav_repeated.reserve(all_wav_max);
+  for (uint32_t file_id = 0; file_id < all_wav.size(); file_id++) {
+    for (int iter = 0; iter < num_iterations; iter++) {
+      all_wav_repeated.push_back(all_wav[file_id]);
     }
+  }
 
-    // Ensure there's also num_parallel_requests in flight
-    uint32_t all_wav_i = 0;
-    auto start_time = std::chrono::steady_clock::now();
-    while (true) {
-        while (NumActiveStreams() < (uint32_t) num_parallel_requests && all_wav_i < all_wav_max) {
-            std::unique_ptr<Stream> stream(new Stream(all_wav_repeated[all_wav_i], all_wav_i));
-            StartNewStream(std::move(stream));
-            ++all_wav_i;
-        }
-
-        // Break if no more tasks to add
-        if (NumStreamsFinished() == all_wav_max) {
-            break;
-        }
+  // Ensure there's also num_parallel_requests in flight
+  uint32_t all_wav_i = 0;
+  auto start_time = std::chrono::steady_clock::now();
+  while (true) {
+    while (NumActiveStreams() < (uint32_t)num_parallel_requests && all_wav_i < all_wav_max) {
+      std::unique_ptr<Stream> stream(new Stream(all_wav_repeated[all_wav_i], all_wav_i));
+      StartNewStream(std::move(stream));
+      ++all_wav_i;
     }
 
-
-    auto current_time = std::chrono::steady_clock::now();
-    {
-        std::lock_guard<std::mutex> lock(latencies_mutex_);
-
-        PrintStats();
-        std::cout << std::flush;
-        double diff_time = std::chrono::duration<double, std::milli>(current_time - start_time).count();
-
-        std::cout << "Run time: " << diff_time / 1000. << " sec." << std::endl;
-        std::cout << "Total audio processed: " << TotalAudioProcessed() << " sec." << std::endl;
-        std::cout << "Throughput: " << TotalAudioProcessed() * 1000. / diff_time << " RTFX"
-                  << std::endl;
+    // Break if no more tasks to add
+    if (NumStreamsFinished() == all_wav_max) {
+      break;
     }
+  }
 
-    return 0;
-}
 
-void
-StreamingRecognizeClient::PostProcessResults(std::shared_ptr<ClientCall> call, bool audio_device) {
-    std::cout << "post result called"<<std::endl;
+  auto current_time = std::chrono::steady_clock::now();
+  {
     std::lock_guard<std::mutex> lock(latencies_mutex_);
-    // it is possible we get one response more than the number of requests sent
-    // in the case where files are perfect multiple of chunk size
-    if (call->recv_times.size() != call->send_times.size() &&
-        call->recv_times.size() != call->send_times.size() + 1) {
-        print_latency_stats_ = false;
-    } else {
-        for (uint32_t time_cnt = 0; time_cnt < call->send_times.size(); ++time_cnt) {
-            double lat = std::chrono::duration<double, std::milli>(
-                    call->recv_times[time_cnt] - call->send_times[time_cnt])
-                    .count();
-            if (call->recv_final_flags[time_cnt]) {
-                final_latencies_.push_back(lat);
-            } else {
-                int_latencies_.push_back(lat);
-            }
-            latencies_.push_back(lat);
-        }
-    }
-    if (print_transcripts_) {
-        call->PrintResult(audio_device, output_file_);
-    }
+
+    PrintStats();
+    std::cout << std::flush;
+    double diff_time = std::chrono::duration<double, std::milli>(current_time - start_time).count();
+
+    std::cout << "Run time: " << diff_time / 1000. << " sec." << std::endl;
+    std::cout << "Total audio processed: " << TotalAudioProcessed() << " sec." << std::endl;
+    std::cout << "Throughput: " << TotalAudioProcessed() * 1000. / diff_time << " RTFX"
+              << std::endl;
+  }
+
+  return 0;
 }
 
 void
-StreamingRecognizeClient::ReceiveResponses(std::shared_ptr<ClientCall> call, bool audio_device) {
-std::cout << "reciving response"<<std::endl;
-    
+StreamingRecognizeClient::PostProcessResults(std::shared_ptr<ClientCall> call, bool audio_device)
+{
+  // std::cout << "post result called"<<std::endl;
+  std::lock_guard<std::mutex> lock(latencies_mutex_);
+  // it is possible we get one response more than the number of requests sent
+  // in the case where files are perfect multiple of chunk size
+  if (call->recv_times.size() != call->send_times.size() &&
+      call->recv_times.size() != call->send_times.size() + 1) {
+    print_latency_stats_ = false;
+  } else {
+    for (uint32_t time_cnt = 0; time_cnt < call->send_times.size(); ++time_cnt) {
+      double lat = std::chrono::duration<double, std::milli>(
+                       call->recv_times[time_cnt] - call->send_times[time_cnt])
+                       .count();
+      if (call->recv_final_flags[time_cnt]) {
+        final_latencies_.push_back(lat);
+      } else {
+        int_latencies_.push_back(lat);
+      }
+      latencies_.push_back(lat);
+    }
+  }
+  if (print_transcripts_) {
+    call->PrintResult(audio_device, output_file_);
+  }
+}
 
-    while (call->streamer->Read(&call->response)) {  // Returns false when no m ore to read.
-        //std::cout << "reciving response 2"<<std::endl;
-        call->recv_times.push_back(std::chrono::steady_clock::now());
-
-        // Reset the partial transcript
-        call->latest_result_.partial_transcript = "";
-        call->latest_result_.partial_time_stamps.clear();
-
-        bool is_final = false;
-        for (int r = 0; r < call->response.results_size(); ++r) {
-            const auto &result = call->response.results(r);
-            if (result.is_final()) {
-                is_final = true;
-            }
-
+std::string
+minusstring(std::string s1, std::string s2)
+{
+  if (s1.find(s2) != std::string::npos) {
+    int j = s1.find(s2);
+    return s1.substr(j + s2.length(), s1.length() - 1);
+  } else
+    return s1;
+}
+void
+StreamingRecognizeClient::ReceiveResponses(std::shared_ptr<ClientCall> call, bool audio_device)
+{
+  // std::cout << "reciving response"<<std::endl;
 
 
+  while (call->streamer->Read(&call->response)) {  // Returns false when no m ore to read.
+    // std::cout << "reciving response 2"<<std::endl;
+    call->recv_times.push_back(std::chrono::steady_clock::now());
 
-            call->latest_result_.audio_processed = result.audio_processed();
-            if (print_transcripts_) {
-                call->AppendResult(result);
+    // Reset the partial transcript
+    call->latest_result_.partial_transcript = "";
+    call->latest_result_.partial_time_stamps.clear();
 
-            }
-        }
-        if (call->response.results_size() && interim_results_ && print_transcripts_) {
-           // std::cout << call->latest_result_.final_transcripts[0] +
-           if(old_data.compare( call->latest_result_.partial_transcript)!=0) {
-              // std::cout << call->latest_result_.partial_transcript
-                //         << std::endl;
-              mx2.lock();
-              std::cout << "updating" <<sdd.length()<<std::endl;
-              datax->append(call->latest_result_.partial_transcript);
-              mx2.unlock();
-           }
-//            if(!old_data.empty())
-            old_data =   call->latest_result_.partial_transcript;
+    bool is_final = false;
+    for (int r = 0; r < call->response.results_size(); ++r) {
+      const auto& result = call->response.results(r);
+      if (result.is_final()) {
+        is_final = true;
+      }
 
-        }
 
-        call->recv_final_flags.push_back(is_final);
+      call->latest_result_.audio_processed = result.audio_processed();
+      if (print_transcripts_) {
+        call->AppendResult(result);
+      }
+    }
+    if (call->response.results_size() && interim_results_ && print_transcripts_) {
+      //    std::cout << call->latest_result_.final_transcripts[0] +
+      //    if(old_data.compare( call->latest_result_.partial_transcript)!=0) {
+      // std::cout << call->latest_result_.partial_transcript
+      //     << std::endl;
+      std::cout << "\n------------------------------------starts\n";
+
+      std::cout << "old string is \n" << old_data << "\n--old is over";
+      std::cout << "\nnew  string is \n"
+                << call->latest_result_.final_transcripts.at(0) << "\n--new is over\n";
+
+      
+      if (minusstring(call->latest_result_.final_transcripts.at(0), old_data).length() != 0 &&
+          !call->latest_result_.final_transcripts.at(0).empty() ) {
+         std::string ak =minusstring(call->latest_result_.final_transcripts.at(0), old_data); 
+        std::cout << "\nwriting\n" << is_final
+                  << ak
+                  << std::endl;
+        mymutex->lock();
+        datax->append(ak);
+        std::cout << "\n now data is "<< datax.get()->c_str() << std::endl;
+         fwrite(call->latest_result_.final_transcripts.at(0).c_str(),1,call->latest_result_.final_transcripts.at(0).length(),f);
+        mymutex->unlock();
+      }
+      if (!call->latest_result_.final_transcripts.at(0).empty())
+        old_data = call->latest_result_.final_transcripts.at(0);
+      std::cout << "\n------------------------------------ends\n";
+      //            if(!old_data.empty())
+      // old_data =   call->latest_result_.partial_transcript;
     }
 
-    grpc::Status status = call->streamer->Finish();
-    if (!status.ok()) {
-        // Report the RPC failure.
-        std::cerr << status.error_message() << std::endl;
-    } else {
-        PostProcessResults(call, audio_device);
-    }
+    call->recv_final_flags.push_back(is_final);
+  }
 
-    num_streams_finished_++;
+  grpc::Status status = call->streamer->Finish();
+  if (!status.ok()) {
+    // Report the RPC failure.
+    std::cerr << status.error_message() << std::endl;
+  } else {
+    PostProcessResults(call, audio_device);
+  }
+
+  num_streams_finished_++;
 }
 
 
 void
-StreamingRecognizeClient::PrintLatencies(std::vector<double> &latencies, const std::string &name) {
-    if (latencies.size() > 0) {
-        std::sort(latencies.begin(), latencies.end());
-        double nresultsf = static_cast<double>(latencies.size());
-        size_t per50i = static_cast<size_t>(std::floor(50. * nresultsf / 100.));
-        size_t per90i = static_cast<size_t>(std::floor(90. * nresultsf / 100.));
-        size_t per95i = static_cast<size_t>(std::floor(95. * nresultsf / 100.));
-        size_t per99i = static_cast<size_t>(std::floor(99. * nresultsf / 100.));
+StreamingRecognizeClient::PrintLatencies(std::vector<double>& latencies, const std::string& name)
+{
+  if (latencies.size() > 0) {
+    std::sort(latencies.begin(), latencies.end());
+    double nresultsf = static_cast<double>(latencies.size());
+    size_t per50i = static_cast<size_t>(std::floor(50. * nresultsf / 100.));
+    size_t per90i = static_cast<size_t>(std::floor(90. * nresultsf / 100.));
+    size_t per95i = static_cast<size_t>(std::floor(95. * nresultsf / 100.));
+    size_t per99i = static_cast<size_t>(std::floor(99. * nresultsf / 100.));
 
-        double median = latencies[per50i];
-        double lat_90 = latencies[per90i];
-        double lat_95 = latencies[per95i];
-        double lat_99 = latencies[per99i];
+    double median = latencies[per50i];
+    double lat_90 = latencies[per90i];
+    double lat_95 = latencies[per95i];
+    double lat_99 = latencies[per99i];
 
-        double avg = std::accumulate(latencies.begin(), latencies.end(), 0.0) / latencies.size();
+    double avg = std::accumulate(latencies.begin(), latencies.end(), 0.0) / latencies.size();
 
-        std::cout << std::setprecision(5);
-        std::cout << name << " (ms):\n";
-        std::cout << "\t\tMedian\t\t90th\t\t95th\t\t99th\t\tAvg\n";
-        std::cout << "\t\t" << median << "\t\t" << lat_90 << "\t\t" << lat_95 << "\t\t" << lat_99
-                  << "\t\t" << avg << std::endl;
-    }
+    std::cout << std::setprecision(5);
+    std::cout << name << " (ms):\n";
+    std::cout << "\t\tMedian\t\t90th\t\t95th\t\t99th\t\tAvg\n";
+    std::cout << "\t\t" << median << "\t\t" << lat_90 << "\t\t" << lat_95 << "\t\t" << lat_99
+              << "\t\t" << avg << std::endl;
+  }
 }
 
 int
-StreamingRecognizeClient::PrintStats() {
-    if (print_latency_stats_ && simulate_realtime_) {
-        PrintLatencies(latencies_, "Latencies");
-        PrintLatencies(int_latencies_, "Intermediate latencies");
-        PrintLatencies(final_latencies_, "Final latencies");
-        return 0;
-    } else {
-        std::cout
-                << "Not printing latency statistics because the client is run without the "
-                   "--simulate_realtime option and/or the number of requests sent is not equal to "
-                   "number of requests received. To get latency statistics, run with --simulate_realtime "
-                   "and set the --chunk_duration_ms to be the same as the server chunk duration"
-                << std::endl;
-        return 1;
-    }
+StreamingRecognizeClient::PrintStats()
+{
+  if (print_latency_stats_ && simulate_realtime_) {
+    PrintLatencies(latencies_, "Latencies");
+    PrintLatencies(int_latencies_, "Intermediate latencies");
+    PrintLatencies(final_latencies_, "Final latencies");
+    return 0;
+  } else {
+    std::cout
+        << "Not printing latency statistics because the client is run without the "
+           "--simulate_realtime option and/or the number of requests sent is not equal to "
+           "number of requests received. To get latency statistics, run with --simulate_realtime "
+           "and set the --chunk_duration_ms to be the same as the server chunk duration"
+        << std::endl;
+    return 1;
+  }
 }
 
 // static void
@@ -354,53 +388,54 @@ StreamingRecognizeClient::PrintStats() {
 
 // }
 
-size_t StreamingRecognizeClient_darshan::sendData(std::string data) {
+size_t
+StreamingRecognizeClient_darshan::sendData(std::string data)
+{
+  std::vector<std::shared_ptr<WaveData>> all_wav;
 
-    
-    std::vector<std::shared_ptr<WaveData>> all_wav;
-
-    LoadWavDatax(all_wav, data);
-    uint32_t all_wav_max = all_wav.size() * 1;
-    std::vector<std::shared_ptr<WaveData>> all_wav_repeated;
-    all_wav_repeated.reserve(all_wav_max);
-    for (uint32_t file_id = 0; file_id < all_wav.size(); file_id++) {
-        for (int iter = 0; iter < 1; iter++) {
-            all_wav_repeated.push_back(all_wav[file_id]);
-        }
+  LoadWavDatax(all_wav, data);
+  uint32_t all_wav_max = all_wav.size() * 1;
+  std::vector<std::shared_ptr<WaveData>> all_wav_repeated;
+  all_wav_repeated.reserve(all_wav_max);
+  for (uint32_t file_id = 0; file_id < all_wav.size(); file_id++) {
+    for (int iter = 0; iter < 1; iter++) {
+      all_wav_repeated.push_back(all_wav[file_id]);
     }
-    uint32_t all_wav_i = 0;
-    auto start_time = std::chrono::steady_clock::now();
-    while (true) {
-        while (NumActiveStreams() < (uint32_t) 1 && all_wav_i < all_wav_max) {
-            std::unique_ptr<Stream> stream(new Stream(all_wav_repeated[all_wav_i], all_wav_i));
-            StartNewStream(std::move(stream));
-              ++all_wav_i;
-        }
-
-        if (NumActiveStreams() == all_wav_max) {
-            break;
-        }
+  }
+  uint32_t all_wav_i = 0;
+  auto start_time = std::chrono::steady_clock::now();
+  while (true) {
+    while (NumActiveStreams() < (uint32_t)1 && all_wav_i < all_wav_max) {
+      std::unique_ptr<Stream> stream(new Stream(all_wav_repeated[all_wav_i], all_wav_i));
+      StartNewStream(std::move(stream));
+      ++all_wav_i;
     }
 
-    return all_wav.at(0)->data.size();
+    if (NumActiveStreams() == all_wav_max) {
+      break;
+    }
+  }
+
+  return all_wav.at(0)->data.size();
 }
 
 void
-StreamingRecognizeClient_darshan::LoadWavDatax(std::vector<std::shared_ptr<WaveData>> &all_wav,
-                                               std::string datatowritten) {
-    nr::AudioEncoding encoding = nr::AudioEncoding::LINEAR_PCM;
-    int samplerate = 16000;
-    int channels = 1;
-    long data_offset = 0;
-    std::shared_ptr<WaveData> wav_data = std::make_shared<WaveData>();
+StreamingRecognizeClient_darshan::LoadWavDatax(
+    std::vector<std::shared_ptr<WaveData>>& all_wav, std::string datatowritten)
+{
+  nr::AudioEncoding encoding = nr::AudioEncoding::LINEAR_PCM;
+  int samplerate = 16000;
+  int channels = 1;
+  long data_offset = 0;
+  std::shared_ptr<WaveData> wav_data = std::make_shared<WaveData>();
 
-    wav_data->sample_rate = samplerate;
-    wav_data->encoding = encoding;
-    wav_data->channels = channels;
-    wav_data->data_offset = data_offset;
-    for (size_t i = 0; i < datatowritten.length(); i++) {
-        wav_data->data.push_back(datatowritten.at(i));
-    }
+  wav_data->sample_rate = samplerate;
+  wav_data->encoding = encoding;
+  wav_data->channels = channels;
+  wav_data->data_offset = data_offset;
+  for (size_t i = 0; i < datatowritten.length(); i++) {
+    wav_data->data.push_back(datatowritten.at(i));
+  }
 
-    all_wav.push_back(std::move(wav_data));
+  all_wav.push_back(std::move(wav_data));
 }
