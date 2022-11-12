@@ -1,49 +1,82 @@
 #pragma once
-#include"streaming_recognize_client.h"
-#include"../utils/grpc.h"
 #include <mutex>
+
+#include "../utils/grpc.h"
+#include "streaming_recognize_client.h"
+
 namespace nr = nvidia::riva;
 namespace nr_asr = nvidia::riva::asr;
 using namespace std::chrono_literals;
-class client
-{
-public:
-    client()
-    {
+class client {
+ public:
+  client()
+  {
+    std::shared_ptr<grpc::ChannelCredentials> creds;
 
-         std::shared_ptr<grpc::ChannelCredentials> creds;
+    creds = grpc::InsecureChannelCredentials();
+    grpc_channel = riva::clients::CreateChannelBlocking("216.48.182.2:50051", creds);
+    
+  }
+  bool verified = false;
+  bool verifyed_tryed = false;
+  std::string api_key;
+  std::vector<std::string> language;
+  std::string format;
+  bool profanity;
+  bool interim;
+  bool word_time_offset;
+  int number_of_streams;
+  bool auth = false;
+  websocketpp::connection_hdl* handle;
+  bool jobcompleted = false;
+  bool first = false;
+  std::string datatowritten;
+  StreamingRecognizeClient_darshan* sclient;
+  std::mutex m;
+
+  std::shared_ptr<std::string> data = std::make_shared<std::string>(std::string());
+
+  websocketpp::server<websocketpp::config::asio_tls>  *serverx;
+  void sendDatatoAsrServer()
+  {
+    // std::cout << "sending data to asr server" << std::endl;
+    //   sclient->sendData(datatowritten);
+    // (*data)->append("hheekkek");
+    std::thread t(&client::datasendfunction, this);
+
      
-        creds = grpc::InsecureChannelCredentials();
-         grpc_channel =   riva::clients::CreateChannelBlocking("216.48.182.2:50051", creds);
 
-         
+    
+    t.detach();
+
+
+
+    // serverx->send(&handle,"hello",)
+  }
+  std::shared_ptr<grpc::Channel> grpc_channel;
+
+  void sendDataToclient() {}
+
+  void datasendfunction()
+  {
+    
+    while (jobcompleted != true) {
+     // std::cout << "ow\n"<<std::endl;
+     
+      while (!datatowritten.empty()) {
+        // std::cout << "ow 2\n"<<std::endl;
+        m.lock();
+
+
+        // std::cout << "sending data" << std::endl;
+        size_t z = sclient->sendData(datatowritten);
+
+        datatowritten.erase(datatowritten.begin(), datatowritten.begin() + z);
+        m.unlock();
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+      }
+          //std::cout << "data sended"<<std::endl;
+             
     }
-    bool verified = false;
-    bool verifyed_tryed = false;
-    std::string api_key;
-    std::vector<std::string> language;
-    std::string format;
-    bool profanity;
-    bool interim;
-    bool word_time_offset;
-    int number_of_streams;
-    bool auth = false;
-    websocketpp::connection_hdl *handle;
-    bool jobcompleted = false;
-    std::string datatowritten;
-    StreamingRecognizeClient_darshan *sclient;
-    std::mutex m;
-    void sendDatatoAsrServer()
-    {
-
-                  sclient->sendData(datatowritten);
-
-        
-    }
-    std::shared_ptr<grpc::Channel> grpc_channel;
-
-    void sendDataToclient()
-    {
-    }
-
+  }
 };
