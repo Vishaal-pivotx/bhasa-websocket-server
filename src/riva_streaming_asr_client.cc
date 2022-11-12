@@ -1,6 +1,7 @@
 #include <iostream>
 #include <websocketpp/config/asio.hpp>
 #include <websocketpp/server.hpp>
+typedef websocketpp::server<websocketpp::config::asio_tls> server;
 #include "client.h"
 #include <nlohmann/json.hpp>
 #include <memory>
@@ -8,7 +9,6 @@
 #include<csignal>
 #include "bs64.h"
 using namespace std;
-typedef websocketpp::server<websocketpp::config::asio_tls> server;
 
 using json = nlohmann::json;
 std::vector<client *> connected_clients;
@@ -45,7 +45,26 @@ public:
     {
         return "test";
     }
-
+    void sendDatatoclient(connection_hdl hdl){
+        while (1)
+        {
+            // cout << "e"<<data->length() << std::endl;
+            mx2.lock();
+             if(connected_clients.at(0)->data->length() !=0){
+            //   std::cout << "sending data to client"<<std::endl;
+              std::error_code ec;
+              m_server.send(hdl,*connected_clients.at(0)->data.get(),websocketpp::frame::opcode::TEXT,ec);
+                connected_clients.at(0)->data->clear();
+                // cout << "\n "<<ec.message();
+               // exit(0);
+           }
+           else{
+            // std::cout << "empty"<<std::endl;
+           }
+           mx2.unlock();
+        }
+        
+    }
     context_ptr on_tls_init(tls_mode mode, websocketpp::connection_hdl hdl)
     {
         namespace asio = websocketpp::lib::asio;
@@ -104,7 +123,7 @@ public:
     {
 
         client *c = new client();
-       
+        c->serverx = &m_server;
         connected_clients.push_back(c);
         c->handle = &hdl;
         m_connections.insert(hdl);
@@ -120,11 +139,8 @@ public:
     void on_message(connection_hdl hdl, server::message_ptr msg)
     {
         msg->set_opcode(websocketpp::frame::opcode::BINARY);
-//        std::cout << "message arrived" << msg->get_payload()<<endl;
         con_list::iterator id = m_connections.find(hdl);
         client *c = connected_clients.at(std::distance(m_connections.begin(), id));
-        std::cout << "message arrived2" << endl;
-
         if (c->verifyed_tryed == false)
         {
             // client sended the first message
@@ -144,16 +160,31 @@ public:
             c->word_time_offset = configx["word_time_offset"];
             c->number_of_streams = configx["number_of_streams"];
             cout << "init ended"<<endl;
-            c->sclient = new StreamingRecognizeClient_darshan(c->grpc_channel,true);
+            c->sclient = new StreamingRecognizeClient_darshan(c->grpc_channel,true,c->data);
             cout << "init ended sucess"<<endl;
         }
         else
         {
-  
+             if(c->first==false){
+                std::cout <<"d";
+                c->first=true;
+                c->sendDatatoAsrServer();
 
-             c->datatowritten.append(msg->get_payload());
-             c->sendDatatoAsrServer();
-           
+                // sendDatatoclient(hdl);
+                std::thread t(&broadcast_server::sendDatatoclient,this,hdl);
+                t.detach();
+             }
+             
+             c->m.lock();
+             std::cout << "j\n"<<std::endl;
+            // m_server.send(*c->handle,"hello",websocketpp::frame::opcode::TEXT);
+             std::cout << "j\n"<<std::endl;
+             //std::cout << "appendding data" << std::endl; 
+            c->datatowritten.append(msg->get_payload());
+            c->m.unlock();
+
+
+            
         }
     }
 
@@ -175,6 +206,7 @@ private:
 };
 
 broadcast_server serverx;
+std::shared_ptr<std::string> data;
 
 void signal_handler(int signal_num)
 {
