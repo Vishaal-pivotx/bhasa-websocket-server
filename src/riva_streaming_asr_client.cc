@@ -2,6 +2,7 @@
 #include <websocketpp/config/asio.hpp>
 #include <websocketpp/server.hpp>
 typedef websocketpp::server<websocketpp::config::asio_tls> server;
+using websocketpp::connection_hdl;
 #include "client.h"
 #include <nlohmann/json.hpp>
 #include <memory>
@@ -12,7 +13,6 @@ using namespace std;
 
 using json = nlohmann::json;
 std::vector<client *> connected_clients;
-using websocketpp::connection_hdl;
 using websocketpp::lib::bind;
 using websocketpp::lib::placeholders::_1;
 using websocketpp::lib::placeholders::_2;
@@ -45,26 +45,26 @@ public:
     {
         return "test";
     }
-    void sendDatatoclient(connection_hdl hdl){
-        while (1)
-        {
-            // cout << "e"<<data->length() << std::endl;
-            mx2.lock();
-             if(connected_clients.at(0)->data->length() !=0){
-            //   std::cout << "sending data to client"<<std::endl;
-              std::error_code ec;
-              m_server.send(hdl,*connected_clients.at(0)->data.get(),websocketpp::frame::opcode::TEXT,ec);
-                connected_clients.at(0)->data->clear();
-                // cout << "\n "<<ec.message();
-               // exit(0);
-           }
-           else{
-            // std::cout << "empty"<<std::endl;
-           }
-           mx2.unlock();
-        }
+    // void sendDatatoclient(connection_hdl hdl){
+    //     while (1)
+    //     {
+    //         // cout << "e"<<data->length() << std::endl;
+    //         mx2.lock();
+    //          if(connected_clients.at(0)->data->length() !=0){
+    //         //   std::cout << "sending data to client"<<std::endl;
+    //           std::error_code ec;
+    //           m_server.send(hdl,*connected_clients.at(0)->data.get(),websocketpp::frame::opcode::TEXT,ec);
+    //             connected_clients.at(0)->data->clear();
+    //             // cout << "\n "<<ec.message();
+    //            // exit(0);
+    //        }
+    //        else{
+    //         // std::cout << "empty"<<std::endl;
+    //        }
+    //        mx2.unlock();
+    //     }
         
-    }
+    // }
     context_ptr on_tls_init(tls_mode mode, websocketpp::connection_hdl hdl)
     {
         namespace asio = websocketpp::lib::asio;
@@ -160,26 +160,23 @@ public:
             c->word_time_offset = configx["word_time_offset"];
             c->number_of_streams = configx["number_of_streams"];
             cout << "init ended"<<endl;
-            c->sclient = new StreamingRecognizeClient_darshan(c->grpc_channel,true,c->data);
-            cout << "init ended sucess"<<endl;
+            c->sclient = new StreamingRecognizeClient_darshan(c->grpc_channel,true,c->data,c->m2);
+            cout << "init ended sucessx"<<endl;
         }
         else
         {
              if(c->first==false){
-                std::cout <<"d";
+            
                 c->first=true;
                 c->sendDatatoAsrServer();
 
                 // sendDatatoclient(hdl);
-                std::thread t(&broadcast_server::sendDatatoclient,this,hdl);
+                std::thread t(&client::sendDatatoclient,c,hdl);
                 t.detach();
              }
              
              c->m.lock();
-             std::cout << "j\n"<<std::endl;
-            // m_server.send(*c->handle,"hello",websocketpp::frame::opcode::TEXT);
-             std::cout << "j\n"<<std::endl;
-             //std::cout << "appendding data" << std::endl; 
+            
             c->datatowritten.append(msg->get_payload());
             c->m.unlock();
 
