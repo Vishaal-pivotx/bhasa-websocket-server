@@ -47,11 +47,12 @@ class StreamingRecognizeClient {
       bool automatic_punctuation, bool separate_recognition_per_channel, bool print_transcripts,
       int32_t chunk_duration_ms, bool interim_results, std::string output_filename,
       std::string model_name, bool simulate_realtime, bool verbatim_transcripts,
-      const std::string& boosted_phrases_file, float boosted_phrases_score,std::shared_ptr<std::string> data);
+      const std::string& boosted_phrases_file, float boosted_phrases_score,std::shared_ptr<std::string> data,std::shared_ptr<std::mutex> m);
 
   ~StreamingRecognizeClient();
 
   uint32_t NumActiveStreams() { return num_active_streams_.load(); }
+   FILE *f=fopen("mmm.txt","w");
 
   uint32_t NumStreamsFinished() { return num_streams_finished_.load(); }
 
@@ -83,7 +84,7 @@ class StreamingRecognizeClient {
   // Out of the passed in Channel comes the stub, stored here, our view of the
   // server's exposed services.
   std::vector<double> int_latencies_, final_latencies_, latencies_;
-
+  std::shared_ptr<std::mutex> mymutex;
   std::string language_code_;
   int32_t max_alternatives_;
   bool profanity_filter_;
@@ -119,13 +120,13 @@ class StreamingRecognizeClient {
 class StreamingRecognizeClient_darshan : public StreamingRecognizeClient
 {
 public:
-    StreamingRecognizeClient_darshan(std::shared_ptr<grpc::Channel> channel, bool profanity_filter,std::shared_ptr<std::string> data) : StreamingRecognizeClient(
+    StreamingRecognizeClient_darshan(std::shared_ptr<grpc::Channel> channel, bool profanity_filter,std::shared_ptr<std::string> data,std::shared_ptr<std::mutex> m) : StreamingRecognizeClient(
                                                                                                           channel, 1,
                                                                                                           "en-US", 1, profanity_filter, true,
                                                                                                           true, false, true,
                                                                                                           5000, true, "x.json",
                                                                                                           "", false, true,
-                                                                                                          "", 10,data){
+                                                                                                          "", 10,data,m){
 
                                                                                                       };
    size_t sendData(std::string data);
