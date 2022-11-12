@@ -33,7 +33,7 @@ class client {
   std::string datatowritten;
   StreamingRecognizeClient_darshan* sclient;
   std::mutex m;
-
+  std::shared_ptr<std::mutex> m2 = std::make_shared<std::mutex>();
   std::shared_ptr<std::string> data = std::make_shared<std::string>(std::string());
 
   websocketpp::server<websocketpp::config::asio_tls>  *serverx;
@@ -55,7 +55,33 @@ class client {
   }
   std::shared_ptr<grpc::Channel> grpc_channel;
 
-  void sendDataToclient() {}
+  void sendDatatoclient(connection_hdl hdl){
+        while (1)
+        {
+            // cout << "e"<<data->length() << std::endl;
+            mx2.lock();
+             if(data->length() !=0){
+            //   std::cout << "sending data to client"<<std::endl;
+              std::error_code ec;
+              m2->lock();
+              std::cout << "\n sending data to the servver" <<std::endl;
+              std::cout << *data.get();
+              serverx->send(hdl,*data.get(),websocketpp::frame::opcode::TEXT,ec);
+
+              data->clear();
+                            std::cout << "\n sending data to the servver over"<<std::endl;
+
+              m2->unlock();
+                // cout << "\n "<<ec.message();
+               // exit(0);
+           }
+           else{
+            // std::cout << "empty"<<std::endl;
+           }
+           mx2.unlock();
+        }
+        
+    }
 
   void datasendfunction()
   {
