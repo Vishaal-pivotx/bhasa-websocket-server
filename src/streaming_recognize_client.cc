@@ -1,52 +1,4 @@
-/*
- * SPDX-FileCopyrightText: Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: MIT
- */
-
-
 #include "streaming_recognize_client.h"
-
-#define clear_screen() printf("\033[H\033[J")
-#define gotoxy(x, y) printf("\033[%d;%dH", (y), (x))
-
-static void
-MicrophoneThreadMain(
-        std::shared_ptr<ClientCall> call, snd_pcm_t *alsa_handle, int samplerate, int numchannels,
-        nr::AudioEncoding &encoding, int32_t chunk_duration_ms, bool &request_exit) {
-    nr_asr::StreamingRecognizeRequest request;
-    int total_samples = 0;
-
-    // Read 0.1s of audio
-    const size_t chunk_size = (samplerate * chunk_duration_ms / 1000) * sizeof(int16_t);
-    std::vector<char> chunk(chunk_size);
-
-    while (true) {
-        // Read another chunk from the mic stream
-        std::streamsize bytes_read = 0;
-        size_t bytes_to_read = chunk_size;
-        if (alsa_handle) {
-            int rc = snd_pcm_readi(alsa_handle, &chunk[0], chunk_size / sizeof(int16_t));
-            bytes_read = rc * sizeof(int16_t);  // convert frames to bytes
-            if (rc < 0) {
-                std::cerr << "read failed : " << snd_strerror(rc) << std::endl;
-                bytes_read = 0;  // reset counter
-            }
-        }
-
-        // And write the chunk to the stream.
-        request.set_audio_content(&chunk[0], bytes_read);
-
-        total_samples += (bytes_read / sizeof(int16_t));
-
-        call->send_times.push_back(std::chrono::steady_clock::now());
-        call->streamer->Write(request);
-        if ((bytes_read < (std::streamsize) bytes_to_read) || request_exit) {
-            // Done reading everything from the file, so done writing to the stream.
-            call->streamer->WritesDone();
-            break;
-        }
-    }
-}
 
 StreamingRecognizeClient::StreamingRecognizeClient(
         std::shared_ptr<grpc::Channel> channel, int32_t num_parallel_requests,
@@ -54,8 +6,8 @@ StreamingRecognizeClient::StreamingRecognizeClient(
         bool automatic_punctuation, bool separate_recognition_per_channel, bool print_transcripts,
         int32_t chunk_duration_ms, bool interim_results, std::string output_filename,
         std::string model_name, bool simulate_realtime, bool verbatim_transcripts,
-        const std::string &boosted_phrases_file, float boosted_phrases_score)
-        : print_latency_stats_(true), stub_(nr_asr::RivaSpeechRecognition::NewStub(channel)),
+        const std::string &boosted_phrases_file, float boosted_phrases_score,std::shared_ptr<std::string> data):datax(data)
+        , print_latency_stats_(true), stub_(nr_asr::RivaSpeechRecognition::NewStub(channel)),
           language_code_(language_code), max_alternatives_(max_alternatives), profanity_filter_(profanity_filter),
           word_time_offsets_(word_time_offsets), automatic_punctuation_(automatic_punctuation),
           separate_recognition_per_channel_(separate_recognition_per_channel),
@@ -244,6 +196,7 @@ StreamingRecognizeClient::DoStreamingFromFile(
 
 void
 StreamingRecognizeClient::PostProcessResults(std::shared_ptr<ClientCall> call, bool audio_device) {
+    std::cout << "post result called"<<std::endl;
     std::lock_guard<std::mutex> lock(latencies_mutex_);
     // it is possible we get one response more than the number of requests sent
     // in the case where files are perfect multiple of chunk size
@@ -271,14 +224,10 @@ StreamingRecognizeClient::PostProcessResults(std::shared_ptr<ClientCall> call, b
 void
 StreamingRecognizeClient::ReceiveResponses(std::shared_ptr<ClientCall> call, bool audio_device) {
 std::cout << "reciving response"<<std::endl;
-    if (audio_device) {
-        clear_screen();
-        std::cout << "ASR started... press `Ctrl-C' to stop recording\n\n";
-        gotoxy(0, 5);
-    }
+    
 
     while (call->streamer->Read(&call->response)) {  // Returns false when no m ore to read.
-        std::cout << "reciving response 2"<<std::endl;
+        //std::cout << "reciving response 2"<<std::endl;
         call->recv_times.push_back(std::chrono::steady_clock::now());
 
         // Reset the partial transcript
@@ -292,23 +241,28 @@ std::cout << "reciving response"<<std::endl;
                 is_final = true;
             }
 
-            if (audio_device) {
-                clear_screen();
-                std::cout << "ASR started... press `Ctrl-C' to stop recording\n\n";
-                gotoxy(0, 5);
-            }
+
 
 
             call->latest_result_.audio_processed = result.audio_processed();
             if (print_transcripts_) {
                 call->AppendResult(result);
+
             }
         }
-
         if (call->response.results_size() && interim_results_ && print_transcripts_) {
-            std::cout << call->latest_result_.final_transcripts[0] +
-                         call->latest_result_.partial_transcript
-                      << std::endl;
+           // std::cout << call->latest_result_.final_transcripts[0] +
+           if(old_data.compare( call->latest_result_.partial_transcript)!=0) {
+              // std::cout << call->latest_result_.partial_transcript
+                //         << std::endl;
+              mx2.lock();
+              std::cout << "updating" <<sdd.length()<<std::endl;
+              datax->append(call->latest_result_.partial_transcript);
+              mx2.unlock();
+           }
+//            if(!old_data.empty())
+            old_data =   call->latest_result_.partial_transcript;
+
         }
 
         call->recv_final_flags.push_back(is_final);
@@ -325,60 +279,6 @@ std::cout << "reciving response"<<std::endl;
     num_streams_finished_++;
 }
 
-int
-StreamingRecognizeClient::DoStreamingFromMicrophone(
-        const std::string &audio_device, bool &request_exit) {
-    nr::AudioEncoding encoding = nr::LINEAR_PCM;
-    int samplerate = 16000;
-    int channels = 1;
-    snd_pcm_t *alsa_handle = nullptr;
-
-    bool ret = OpenAudioDevice(
-            audio_device.c_str(), &alsa_handle, SND_PCM_STREAM_CAPTURE, channels, samplerate,
-            100000 /* latency in us */);
-
-    if (ret == false) {
-        std::cerr << "Error opening capture device " << audio_device << std::endl;
-        return 1;
-    }
-    std::cout << "Using device:" << audio_device << std::endl;
-
-    std::shared_ptr<ClientCall> call = std::make_shared<ClientCall>(1, word_time_offsets_);
-    call->streamer = stub_->StreamingRecognize(&call->context);
-
-    // Send first request
-    nr_asr::StreamingRecognizeRequest request;
-    auto streaming_config = request.mutable_streaming_config();
-    streaming_config->set_interim_results(interim_results_);
-    auto config = streaming_config->mutable_config();
-    config->set_sample_rate_hertz(samplerate);
-    config->set_language_code(language_code_);
-    config->set_encoding(encoding);
-    config->set_max_alternatives(max_alternatives_);
-    config->set_profanity_filter(profanity_filter_);
-    config->set_audio_channel_count(channels);
-    config->set_enable_word_time_offsets(word_time_offsets_);
-    config->set_enable_automatic_punctuation(automatic_punctuation_);
-    config->set_enable_separate_recognition_per_channel(separate_recognition_per_channel_);
-    config->set_verbatim_transcripts(verbatim_transcripts_);
-    if (model_name_ != "") {
-        config->set_model(model_name_);
-    }
-
-    call->streamer->Write(request);
-
-    std::thread microphone_thread(
-            &MicrophoneThreadMain, call, alsa_handle, samplerate, channels, std::ref(encoding),
-            chunk_duration_ms_, std::ref(request_exit));
-
-    ReceiveResponses(call, true /*audio_device*/);
-    microphone_thread.join();
-
-    CloseAudioDevice(&alsa_handle);
-
-    std::cout << "\nExiting with 0" << std::flush << std::endl;
-    return 0;
-}
 
 void
 StreamingRecognizeClient::PrintLatencies(std::vector<double> &latencies, const std::string &name) {
@@ -423,45 +323,43 @@ StreamingRecognizeClient::PrintStats() {
     }
 }
 
-static void
-MicrophoneThreadMain2(
-        std::shared_ptr<ClientCall> call, std::string data, int samplerate, int numchannels,
-        nr::AudioEncoding &encoding, int32_t chunk_duration_ms) {
-    nr_asr::StreamingRecognizeRequest request;
-    int total_samples = 0;
+// static void
+// MicrophoneThreadMain2(
+//         std::shared_ptr<ClientCall> call, std::string data, int samplerate, int numchannels,
+//         nr::AudioEncoding &encoding, int32_t chunk_duration_ms) {
+//     nr_asr::StreamingRecognizeRequest request;
+//     int total_samples = 0;
 
-    // Read 0.1s of audio
-    const size_t chunk_size = (samplerate * chunk_duration_ms / 1000) * sizeof(int16_t);
-    std::vector<char> chunk(chunk_size);
-
-
-    // Read another chunk from the mic stream
-    std::streamsize bytes_read = 0;
-    size_t bytes_to_read = chunk_size;
-
-    for (size_t i = 0; i < data.size(); i++) {
-        chunk.push_back(data.at(i));
-    }
-
-    // And write the chunk to the stream.
-    request.set_audio_content(&chunk[0], data.size());
-
-    total_samples += (bytes_read / sizeof(int16_t));
-
-    call->send_times.push_back(std::chrono::steady_clock::now());
-    call->streamer->Write(request);
-    call->streamer->WritesDone();
-
-}
-
-void StreamingRecognizeClient_darshan::sendData(std::string data) {
+//     // Read 0.1s of audio
+//     const size_t chunk_size = (samplerate * chunk_duration_ms / 1000) * sizeof(int16_t);
+//     std::vector<char> chunk(chunk_size);
 
 
-    std::cout << "some data arrived at sendData" << std::endl;
+//     // Read another chunk from the mic stream
+//     std::streamsize bytes_read = 0;
+//     size_t bytes_to_read = chunk_size;
+
+//     for (size_t i = 0; i < data.size(); i++) {
+//         chunk.push_back(data.at(i));
+//     }
+
+//     // And write the chunk to the stream.
+//     request.set_audio_content(&chunk[0], data.size());
+
+//     total_samples += (bytes_read / sizeof(int16_t));
+
+//     call->send_times.push_back(std::chrono::steady_clock::now());
+//     call->streamer->Write(request);
+//     call->streamer->WritesDone();
+
+// }
+
+size_t StreamingRecognizeClient_darshan::sendData(std::string data) {
+
+    
     std::vector<std::shared_ptr<WaveData>> all_wav;
 
     LoadWavDatax(all_wav, data);
-    std::cout << "wave data is successfully loaded" << std::endl;
     uint32_t all_wav_max = all_wav.size() * 1;
     std::vector<std::shared_ptr<WaveData>> all_wav_repeated;
     all_wav_repeated.reserve(all_wav_max);
@@ -473,33 +371,18 @@ void StreamingRecognizeClient_darshan::sendData(std::string data) {
     uint32_t all_wav_i = 0;
     auto start_time = std::chrono::steady_clock::now();
     while (true) {
-        std::cout << "looping"<<" "<<NumStreamsFinished() << " "<<NumActiveStreams()<<std::endl;
         while (NumActiveStreams() < (uint32_t) 1 && all_wav_i < all_wav_max) {
             std::unique_ptr<Stream> stream(new Stream(all_wav_repeated[all_wav_i], all_wav_i));
             StartNewStream(std::move(stream));
               ++all_wav_i;
         }
 
-//NumStreamsFinished()        // Break if no more tasks to add
         if (NumActiveStreams() == all_wav_max) {
             break;
         }
     }
 
-
-    auto current_time = std::chrono::steady_clock::now();
-    {
-        std::lock_guard<std::mutex> lock(latencies_mutex_);
-
-        PrintStats();
-        std::cout << std::flush;
-        double diff_time = std::chrono::duration<double, std::milli>(current_time - start_time).count();
-
-        std::cout << "Run time: " << diff_time / 1000. << " sec." << std::endl;
-        std::cout << "Total audio processed: " << TotalAudioProcessed() << " sec." << std::endl;
-        std::cout << "Throughput: " << TotalAudioProcessed() * 1000. / diff_time << " RTFX"
-                  << std::endl;
-    }
+    return all_wav.at(0)->data.size();
 }
 
 void
