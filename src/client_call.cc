@@ -73,7 +73,7 @@ ClientCall::PrintResult(bool audio_device, std::ofstream& output_file)
     for (uint32_t a = 0; a < latest_result_.final_transcripts.size(); ++a) {
       if (a == 0) {
         output_file << "{\"audio_filepath\": \"" << filename << "\",";
-        datax->append( EscapeTranscript(latest_result_.final_transcripts[a]));
+       // datax->append( EscapeTranscript(latest_result_.final_transcripts[a]));
 
         output_file << "\"text\": \"" << EscapeTranscript(latest_result_.final_transcripts[a])
                     << "\"}" << std::endl;
