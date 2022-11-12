@@ -69,6 +69,7 @@ class ClientCall {
   uint32_t corr_id_;
   bool word_time_offsets_;
  std::shared_ptr<std::string> datax;
+ 
   Results latest_result_;
 
   std::vector<std::chrono::time_point<std::chrono::steady_clock>> send_times, recv_times;
