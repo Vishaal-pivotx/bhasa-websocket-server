@@ -1,0 +1,1 @@
+bazel-5.0.0 build //riva/clients/asr:riva_streaming_asr_client
