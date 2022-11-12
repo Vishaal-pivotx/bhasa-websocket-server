@@ -37,7 +37,8 @@ using grpc::StatusCode;
 
 namespace nr = nvidia::riva;
 namespace nr_asr = nvidia::riva::asr;
-
+static std::string sdd;
+static std::mutex mx2;
 class StreamingRecognizeClient {
  public:
   StreamingRecognizeClient(
@@ -46,7 +47,7 @@ class StreamingRecognizeClient {
       bool automatic_punctuation, bool separate_recognition_per_channel, bool print_transcripts,
       int32_t chunk_duration_ms, bool interim_results, std::string output_filename,
       std::string model_name, bool simulate_realtime, bool verbatim_transcripts,
-      const std::string& boosted_phrases_file, float boosted_phrases_score);
+      const std::string& boosted_phrases_file, float boosted_phrases_score,std::shared_ptr<std::string> data);
 
   ~StreamingRecognizeClient();
 
@@ -67,17 +68,17 @@ class StreamingRecognizeClient {
 
   void ReceiveResponses(std::shared_ptr<ClientCall> call, bool audio_device);
 
-  int DoStreamingFromMicrophone(const std::string& auido_device, bool& request_exit);
 
   void PrintLatencies(std::vector<double>& latencies, const std::string& name);
 
   int PrintStats();
-
+   std::shared_ptr<std::string> datax;
   std::mutex latencies_mutex_;
 
   bool print_latency_stats_;
 
   std::unique_ptr<nr_asr::RivaSpeechRecognition::Stub> stub_;
+  std::string old_data;
  private:
   // Out of the passed in Channel comes the stub, stored here, our view of the
   // server's exposed services.
@@ -118,16 +119,16 @@ class StreamingRecognizeClient {
 class StreamingRecognizeClient_darshan : public StreamingRecognizeClient
 {
 public:
-    StreamingRecognizeClient_darshan(std::shared_ptr<grpc::Channel> channel, bool profanity_filter) : StreamingRecognizeClient(
+    StreamingRecognizeClient_darshan(std::shared_ptr<grpc::Channel> channel, bool profanity_filter,std::shared_ptr<std::string> data) : StreamingRecognizeClient(
                                                                                                           channel, 1,
                                                                                                           "en-US", 1, profanity_filter, true,
                                                                                                           true, false, true,
                                                                                                           5000, true, "x.json",
                                                                                                           "", false, true,
-                                                                                                          "", 10){
+                                                                                                          "", 10,data){
 
                                                                                                       };
-   void sendData(std::string data);
+   size_t sendData(std::string data);
 void    LoadWavDatax(std::vector<std::shared_ptr<WaveData>>&,std::string );
 
 };
