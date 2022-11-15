@@ -1,3 +1,5 @@
+
+
 #pragma once
 #include <mutex>
 
@@ -17,6 +19,10 @@ class client {
     grpc_channel = riva::clients::CreateChannelBlocking("216.48.182.2:50051", creds);
     
   }
+  ~client(){
+    std::cout  << "destructor is called" << std::endl;
+    first = true;
+  }
   bool verified = false;
   bool verifyed_tryed = false;
   std::string api_key;
@@ -29,7 +35,9 @@ class client {
   bool auth = false;
   websocketpp::connection_hdl* handle;
   bool jobcompleted = false;
-  bool first = false;
+  bool first = true;
+  std::string name;
+  bool iserror=false;
   std::string datatowritten;
   StreamingRecognizeClient_darshan* sclient;
   std::mutex m;
@@ -64,12 +72,12 @@ class client {
             //   std::cout << "sending data to client"<<std::endl;
               std::error_code ec;
               m2->lock();
-              std::cout << "\n sending data to the servver" <<std::endl;
-              std::cout << *data.get();
+              // std::cout << "\n sending data to the servver" <<std::endl;
+              // std::cout << *data.get();
               serverx->send(hdl,*data.get(),websocketpp::frame::opcode::TEXT,ec);
 
               data->clear();
-                            std::cout << "\n sending data to the servver over"<<std::endl;
+                     //       std::cout << "\n sending data to the servver over"<<std::endl;
 
               m2->unlock();
                 // cout << "\n "<<ec.message();
@@ -86,7 +94,7 @@ class client {
   void datasendfunction()
   {
     
-    while (jobcompleted != true) {
+    while (jobcompleted != true ) {
      // std::cout << "ow\n"<<std::endl;
      
       while (!datatowritten.empty()) {
@@ -94,7 +102,7 @@ class client {
         m.lock();
 
 
-        // std::cout << "sending data" << std::endl;
+        std::cout << "sending data" << std::endl;
         size_t z = sclient->sendData(datatowritten);
 
         datatowritten.erase(datatowritten.begin(), datatowritten.begin() + z);
