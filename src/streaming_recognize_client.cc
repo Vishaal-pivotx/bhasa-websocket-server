@@ -280,6 +280,7 @@ StreamingRecognizeClient::ReceiveResponses(std::shared_ptr<ClientCall> call, boo
             j["word"] =  x.words(i).word();
             j["start_time"] =  x.words(i).start_time();
             j["end_time"] =  x.words(i).end_time();
+            j["confidence"] = x.words(i).confidence();
             xs.push_back(j);
            }
            j["alternatives"]["transcript"] = x.transcript();
@@ -287,6 +288,10 @@ StreamingRecognizeClient::ReceiveResponses(std::shared_ptr<ClientCall> call, boo
            j["confidence"] = x.confidence();
            j["channal_tag"] = result.channel_tag();
            j["audio_processed"] = result.audio_processed();
+           if(result.is_final()){
+             j["is_final"] = true;
+           }
+
           // std::cout  << j.dump() << std::endl;
            mymutex->lock();
            datax->append(j.dump());
