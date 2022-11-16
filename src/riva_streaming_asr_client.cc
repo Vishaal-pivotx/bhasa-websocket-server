@@ -41,26 +41,7 @@ class broadcast_server {
     m_server.set_message_handler(bind(&broadcast_server::on_message, this, ::_1, ::_2));
   }
   std::string get_password() { return "test"; }
-  // void sendDatatoclient(connection_hdl hdl){
-  //     while (1)
-  //     {
-  //         // cout << "e"<<data->length() << std::endl;
-  //         mx2.lock();
-  //          if(connected_clients.at(0)->data->length() !=0){
-  //         //   std::cout << "sending data to client"<<std::endl;
-  //           std::error_code ec;
-  //           m_server.send(hdl,*connected_clients.at(0)->data.get(),websocketpp::frame::opcode::TEXT,ec);
-  //             connected_clients.at(0)->data->clear();
-  //             // cout << "\n "<<ec.message();
-  //            // exit(0);
-  //        }
-  //        else{
-  //         // std::cout << "empty"<<std::endl;
-  //        }
-  //        mx2.unlock();
-  //     }
 
-  // }
   context_ptr on_tls_init(tls_mode mode, websocketpp::connection_hdl hdl)
   {
     namespace asio = websocketpp::lib::asio;
@@ -165,24 +146,34 @@ class broadcast_server {
     
     // std::cout << "at on message"<<c->first<<std::endl;
     if (c->verifyed_tryed == false) {
+
       // client sended the first message
       c->verifyed_tryed = true;
       json configx;
-      std::cout << "init json " << std::endl;
+      
       configx = json::parse(msg->get_payload().c_str());
 
       c->api_key = configx["api_key"];
-
       for (auto& elem : configx["language"]) c->language.push_back(elem);
       c->format = configx["format"];
-
       c->profanity = configx["profanity"];
       c->interim = configx["interim"];
       c->word_time_offset = configx["word_time_offset"];
       c->number_of_streams = configx["number_of_streams"];
-      cout << "init ended" << endl;
-      c->sclient = new StreamingRecognizeClient_darshan(c->grpc_channel, true, c->data, c->m2);
-      cout << "init ended sucessx" << endl;
+      nvidia::riva::AudioEncoding myencoding;
+      if(c->format == "LINEAR-PCM"){
+        myencoding =nvidia::riva::LINEAR_PCM;
+      }
+      else if(c->format == "FLAC"){
+        myencoding = nvidia::riva::FLAC;
+      }
+
+      c->sclient = new StreamingRecognizeClient_darshan(c->grpc_channel, true,false,myencoding, c->data, c->m2);
+      
+
+
+     m_server.send(hdl,"{\"message\": \"initialised\"}",websocketpp::frame::opcode::TEXT);
+
     } else {
       if (c->first == true) {
 
