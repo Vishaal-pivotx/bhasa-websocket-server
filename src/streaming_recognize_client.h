@@ -69,6 +69,7 @@ class StreamingRecognizeClient {
 
   void ReceiveResponses(std::shared_ptr<ClientCall> call, bool audio_device);
 
+ 
 
   void PrintLatencies(std::vector<double>& latencies, const std::string& name);
 
@@ -124,7 +125,7 @@ public:
                                                                                                           channel, 1,
                                                                                                           "en-US", 1, profanity_filter, true,
                                                                                                           true, false, true,
-                                                                                                          5000, true, "x.json",
+                                                                                                          5000, false, "x.json",
                                                                                                           "", false, true,
                                                                                                           "", 10,data,m){
 
