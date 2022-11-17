@@ -43,16 +43,18 @@ class StreamingRecognizeClient {
  public:
   StreamingRecognizeClient(
       std::shared_ptr<grpc::Channel> channel, int32_t num_parallel_requests,
-      const std::string& language_code, int32_t max_alternatives, bool profanity_filter, bool word_time_offsets,
-      bool automatic_punctuation, bool separate_recognition_per_channel, bool print_transcripts,
-      int32_t chunk_duration_ms, bool interim_results, std::string output_filename,
-      std::string model_name, bool simulate_realtime, bool verbatim_transcripts,
-      const std::string& boosted_phrases_file, float boosted_phrases_score,std::shared_ptr<std::string> data,std::shared_ptr<std::mutex> m);
+      const std::string& language_code, int32_t max_alternatives, bool profanity_filter,
+      bool word_time_offsets, bool automatic_punctuation, bool separate_recognition_per_channel,
+      bool print_transcripts, int32_t chunk_duration_ms, bool interim_results,
+      std::string output_filename, std::string model_name, bool simulate_realtime,
+      bool verbatim_transcripts, const std::string& boosted_phrases_file,
+      float boosted_phrases_score, std::shared_ptr<std::string> data,
+      std::shared_ptr<std::mutex> m);
 
   ~StreamingRecognizeClient();
 
   uint32_t NumActiveStreams() { return num_active_streams_.load(); }
-   FILE *f=fopen("mmm.txt","w");
+  FILE* f = fopen("mmm.txt", "w");
 
   uint32_t NumStreamsFinished() { return num_streams_finished_.load(); }
 
@@ -69,18 +71,18 @@ class StreamingRecognizeClient {
 
   void ReceiveResponses(std::shared_ptr<ClientCall> call, bool audio_device);
 
- 
 
   void PrintLatencies(std::vector<double>& latencies, const std::string& name);
 
   int PrintStats();
-   std::shared_ptr<std::string> datax;
+  std::shared_ptr<std::string> datax;
   std::mutex latencies_mutex_;
 
   bool print_latency_stats_;
 
   std::unique_ptr<nr_asr::RivaSpeechRecognition::Stub> stub_;
   std::string old_data;
+
  private:
   // Out of the passed in Channel comes the stub, stored here, our view of the
   // server's exposed services.
@@ -118,20 +120,20 @@ class StreamingRecognizeClient {
   float boosted_phrases_score_;
 };
 
-class StreamingRecognizeClient_darshan : public StreamingRecognizeClient
-{
-public:
-    StreamingRecognizeClient_darshan(std::shared_ptr<grpc::Channel> channel, bool profanity_filter,std::shared_ptr<std::string> data,std::shared_ptr<std::mutex> m) : StreamingRecognizeClient(
-                                                                                                          channel, 1,
-                                                                                                          "en-US", 1, profanity_filter, true,
-                                                                                                          true, false, true,
-                                                                                                          5000, false, "x.json",
-                                                                                                          "", false, true,
-                                                                                                          "", 10,data,m){
+class StreamingRecognizeClient_darshan : public StreamingRecognizeClient {
+ public:
+  StreamingRecognizeClient_darshan(
+      std::shared_ptr<grpc::Channel> channel, bool profanity_filter, bool intrim,
+      nvidia::riva::AudioEncoding x, std::shared_ptr<std::string> data,
+      std::shared_ptr<std::mutex> m)
+      : StreamingRecognizeClient(
+            channel, 1, "en-US", 1, profanity_filter, true, true, false, true, 5000, false,
+            "x.json", "", false, true, "", 10, data, m){
+           audio_encoding = x;
+        };
+  size_t sendData(std::string data);
+  void LoadWavDatax(std::vector<std::shared_ptr<WaveData>>&, std::string);
 
-                                                                                                      };
-   size_t sendData(std::string data);
-void    LoadWavDatax(std::vector<std::shared_ptr<WaveData>>&,std::string );
-
+ private:
+  nvidia::riva::AudioEncoding audio_encoding;
 };
-
